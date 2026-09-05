@@ -1,0 +1,38 @@
+name: Build Bonelab Mod
+on: [push, workflow_dispatch]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '6.0.x'
+
+      - name: Create Project Setup
+        run: |
+          dotnet new classlib -n PeeMod --framework net6.0
+          rm -f PeeMod/Class1.cs
+          if [ -f "PeeMod.cs" ]; then mv PeeMod.cs PeeMod/; fi
+          if [ -f "PeeMod.txt" ]; then mv PeeMod.txt PeeMod/PeeMod.cs; fi
+
+      - name: Fake MelonLoader References
+        run: |
+          echo 'namespace MelonLoader { public class MelonMod {} public class MelonInfoAttribute : System.Attribute { public MelonInfoAttribute(System.Type t, string n, string v, string a){} } public class MelonGameAttribute : System.Attribute { public MelonGameAttribute(string d, string g){} } public class MelonPreferences_Category {} public class MelonPreferences_Entry<T> { public T Value { get; set; } } public class MelonPreferences { public static MelonPreferences_Category CreateCategory(string n){ return null; } } public class MelonLogger { public static void Msg(string m){} } }' > PeeMod/MelonStub.cs
+          echo 'namespace MelonLoader { public class MelonPreferences_Category { public MelonPreferences_Entry<T> CreateEntry<T>(string k, T d, string display = "", string desc = ""){ return new MelonPreferences_Entry<T>{ Value = d }; } } }' >> PeeMod/MelonStub.cs
+          echo 'namespace UnityEngine { public class GameObject { public GameObject(string n){} public T AddComponent<T>() where T : new() { return new T(); } public static void DontDestroyOnLoad(GameObject o){} public static void Destroy(object o){} public static GameObject CreatePrimitive(PrimitiveType t){ return new GameObject(""); } public bool activeSelf { get; set; } public void SetActive(bool b){} public Transform transform { get; set; } } public enum PrimitiveType { Cylinder } public class Transform { public Vector3 position { get; set; } public Vector3 forward { get; set; } public Vector3 right { get; set; } public Vector3 localScale { get; set; } } public struct Vector3 { public float x, y, z; public static Vector3 zero => new Vector3(); public static Vector3 down => new Vector3(); public static Vector3 up => new Vector3(); public static Vector3 operator +(Vector3 a, Vector3 b){ return a; } public static Vector3 operator *(Vector3 a, float b){ return a; } public Vector3 normalized => this; } public struct Color { public float r, g, b, a; public Color(float r, float g, float b, float a){} } public class LineRenderer : MonoBehaviour { public int positionCount { get; set; } public float widthMultiplier { get; set; } public Material material { get; set; } public Color startColor { get; set; } public Color endColor { get; set; } public bool enabled { get; set; } public void SetPosition(int i, Vector3 p){} } public class AudioSource : MonoBehaviour { public AudioClip clip { get; set; } public bool loop { get; set; } public float volume { get; set; } public float spatialBlend { get; set; } public bool playOnAwake { get; set; } public bool isPlaying { get; set; } public void Play(){} public void Stop(){} } public class AudioClip { public static AudioClip Create(string n, int s, int c, int r, bool b){ return new AudioClip(); } public void SetData(float d, int o){} } public class MeshRenderer { public Material material { get; set; } } public class Material { public Material(Shader s){} public Color color { get; set; } public void SetFloat(string n, float v){} public void SetInt(string n, int v){} public void DisableKeyword(string n){} public void EnableKeyword(string n){} public int renderQueue { get; set; } } public class Shader { public static Shader Find(string n){ return null; } } public class MonoBehaviour {} public class Camera { public static Camera main => null; public Transform transform { get; set; } } public class Time { public static float deltaTime => 0.016f; public static float time => 1.0f; } public class Mathf { public static float Sin(float f){ return 0f; } public static float Min(float a, float b){ return a; } public static float Max(float a, float b){ return a; } } public struct RaycastHit { public Vector3 point { get; set; } } public class Physics { public static bool Raycast(Vector3 o, Vector3 d, out RaycastHit h, float dist){ h = new RaycastHit(); return false; } } }' > PeeMod/UnityStub.cs
+          echo 'namespace UnityEngine.XR { public enum XRNode { LeftHand, RightHand } public class InputDevices { public static XRDevice GetDeviceAtXRNode(XRNode n){ return new XRDevice(); } } public class XRDevice { public bool isValid => false; public bool TryGetFeatureValue(InputFeatureUsage<bool> f, out bool v){ v = false; return false; } } public struct InputFeatureUsage<T> { public InputFeatureUsage(string name){} } public class CommonUsages { public static InputFeatureUsage<bool> primaryButton = new InputFeatureUsage<bool>("PrimaryButton"); public static InputFeatureUsage<bool> triggerButton = new InputFeatureUsage<bool>("TriggerButton"); } }' > PeeMod/XRStub.cs
+          echo 'namespace BoneLib { public class BoneMenu { } }' > PeeMod/BoneLibStub.cs
+
+      - name: Build DLL
+        run: dotnet build PeeMod/PeeMod.csproj -c Release /p:NoWarn=CS0618
+
+      - name: Upload Finished Mod
+        uses: actions/upload-artifact@v4
+        with:
+          name: PeeMod-Compiled-DLL
+          path: PeeMod/bin/Release/**/PeeMod.dll
