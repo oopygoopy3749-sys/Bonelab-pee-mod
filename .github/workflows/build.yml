@@ -1,0 +1,48 @@
+name: Build Bonelab Mod
+on: [push, workflow_dispatch]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '6.0.x'
+
+      - name: Create Project Setup
+        run: |
+          dotnet new classlib -n PeeMod
+          Remove-Item PeeMod/Class1.cs
+          if (Test-Path "PeeMod.cs") { Move-Item PeeMod.cs PeeMod/ }
+          if (Test-Path "PeeMod.txt") { Move-Item PeeMod.txt PeeMod/PeeMod.cs }
+
+      - name: Download Modding Dependencies
+        run: |
+          mkdir PeeMod/lib
+          # Pull down necessary MelonLoader assembly files
+          Invoke-WebRequest -Uri "https://github.com" -OutFile "melon.zip"
+          Expand-Archive -Path "melon.zip" -DestinationPath "melon_extracted"
+          if (Test-Path "melon_extracted/MelonLoader.dll") { Copy-Item "melon_extracted/MelonLoader.dll" -Destination "PeeMod/lib/" }
+          
+          # Pull down core Unity/BoneLib reference definitions 
+          Invoke-WebRequest -Uri "https://github.com" -OutFile "PeeMod/lib/BoneLib.dll"
+
+      - name: Configure Project References
+        run: |
+          cd PeeMod
+          # Force references to standard Unity/Melon elements if local download is a fallback stub
+          dotnet add project PeeMod.csproj reference lib/*.dll || echo "Linking references manually"
+          cd ..
+
+      - name: Build DLL
+        run: dotnet build PeeMod/PeeMod.csproj -c Release
+
+      - name: Upload Finished Mod
+        uses: actions/upload-artifact@v4
+        with:
+          name: PeeMod-Compiled-DLL
+          path: PeeMod/bin/Release/**/PeeMod.dll
