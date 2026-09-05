@@ -1,4 +1,4 @@
-name: Build Bonelab Mod
+
 on: [push, workflow_dispatch]
 
 jobs:
@@ -28,11 +28,4 @@ jobs:
           echo 'namespace UnityEngine.XR { public enum XRNode { LeftHand, RightHand } public class InputDevices { public static XRDevice GetDeviceAtXRNode(XRNode n){ return new XRDevice(); } } public class XRDevice { public bool isValid => false; public bool TryGetFeatureValue(InputFeatureUsage<bool> f, out bool v){ v = false; return false; } } public struct InputFeatureUsage<T> { public InputFeatureUsage(string name){} } public class CommonUsages { public static InputFeatureUsage<bool> primaryButton = new InputFeatureUsage<bool>("PrimaryButton"); public static InputFeatureUsage<bool> triggerButton = new InputFeatureUsage<bool>("TriggerButton"); } }' > PeeMod/XRStub.cs
           echo 'namespace BoneLib { public class BoneMenu { } }' > PeeMod/BoneLibStub.cs
 
-      - name: Build DLL
-        run: dotnet build PeeMod/PeeMod.csproj -c Release /p:NoWarn=CS0618
-
-      - name: Upload Finished Mod
-        uses: actions/upload-artifact@v4
-        with:
-          name: PeeMod-Compiled-DLL
-          path: PeeMod/bin/Release/**/PeeMod.dll
+      - 
