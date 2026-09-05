@@ -1,0 +1,204 @@
+name: Build Bonelab Mod
+on: [push, workflow_dispatch]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '6.0.x'
+
+      - name: Create Project Setup
+        run: |
+          dotnet new classlib -n PeeMod --framework net6.0
+          rm -f PeeMod/Class1.cs
+
+      - name: Write Mod Code Directly
+        run: |
+          cat << 'EOF' > PeeMod/PeeMod.cs
+          using System;
+          using System.Collections.Generic;
+          using MelonLoader;
+          using UnityEngine;
+          using UnityEngine.XR;
+
+          [assembly: MelonInfo(typeof(PeeMod.PeeModMain), "PeeMod", "1.0.0", "YourName")]
+          [assembly: MelonGame("Stress Level Zero", "BONELAB")]
+
+          namespace PeeMod
+          {
+              public class PeeModMain : MelonMod
+              {
+                  static MelonPreferences_Category prefCategory;
+                  static MelonPreferences_Entry<XRNode> prefHand;
+                  static MelonPreferences_Entry<float> prefFlowStrength;
+                  static MelonPreferences_Entry<bool> prefToggleMode;
+                  static MelonPreferences_Entry<Color> prefStreamColor;
+
+                  bool isPeeing = false;
+                  bool lastButtonState = false;
+
+                  LineRenderer stream;
+                  AudioSource audioSource;
+                  GameObject puddleObj;
+                  MeshRenderer puddleRenderer;
+                  float puddleScale = 0f;
+                  const float MAX_PUDDLE_SCALE = 1.4f;
+                  const float PUDDLE_GROW_RATE = 0.35f;
+
+                  Vector3 lockedPuddlePos;
+                  bool havePuddlePos;
+
+                  public override void OnInitializeMelon()
+                  {
+                      prefCategory = MelonPreferences.CreateCategory("PeeMod");
+                      prefHand = prefCategory.CreateEntry("Hand", XRNode.RightHand, "Hand", "");
+                      prefFlowStrength = prefCategory.CreateEntry("FlowStrength", 3.5f, "FlowStrength", "");
+                      prefToggleMode = prefCategory.CreateEntry("ToggleMode", false, "ToggleMode", "");
+                      prefStreamColor = prefCategory.CreateEntry("StreamColor", new Color(0.95f, 0.85f, 0.15f, 0.85f), "StreamColor", "");
+
+                      BuildEffectObjects();
+                  }
+
+                  void BuildEffectObjects()
+                  {
+                      var streamObj = new GameObject("PeeMod_Stream");
+                      UnityEngine.Object.DontDestroyOnLoad(streamObj);
+                      stream = streamObj.AddComponent<LineRenderer>();
+                      stream.positionCount = 12;
+                      stream.widthMultiplier = 0.03f;
+                      stream.material = new Material(Shader.Find("Sprites/Default"));
+                      stream.startColor = prefStreamColor.Value;
+                      stream.endColor = new Color(prefStreamColor.Value.r, prefStreamColor.Value.g, prefStreamColor.Value.b, 0.15f);
+                      stream.enabled = false;
+
+                      audioSource = streamObj.AddComponent<AudioSource>();
+                      audioSource.clip = GenerateStreamNoiseClip();
+                      audioSource.loop = true;
+                      audioSource.volume = 0.5f;
+                      audioSource.spatialBlend = 1f;
+                      audioSource.playOnAwake = false;
+
+                      puddleObj = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+                      UnityEngine.Object.DontDestroyOnLoad(puddleObj);
+                      UnityEngine.Object.Destroy(puddleObj.GetComponent<Collider>());
+                      puddleObj.transform.localScale = new Vector3(0.01f, 0.005f, 0.01f);
+                      puddleRenderer = puddleObj.GetComponent<MeshRenderer>();
+                      var mat = new Material(Shader.Find("Standard"));
+                      mat.color = new Color(prefStreamColor.Value.r, prefStreamColor.Value.g, prefStreamColor.Value.b, 0.55f);
+                      SetMaterialTransparent(mat);
+                      puddleRenderer.material = mat;
+                      puddleObj.SetActive(false);
+                  }
+
+                  static void SetMaterialTransparent(Material mat)
+                  {
+                      mat.SetFloat("_Mode", 3);
+                      mat.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+                      mat.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+                      mat.SetInt("_ZWrite", 0);
+                      mat.DisableKeyword("_ALPHATEST_ON");
+                      mat.EnableKeyword("_ALPHABLEND_ON");
+                      mat.renderQueue = 3000;
+                  }
+
+                  AudioClip GenerateStreamNoiseClip()
+                  {
+                      int sampleRate = 44100;
+                      int samples = (int)(sampleRate * 1.0f);
+                      var clip = AudioClip.Create("PeeMod_Stream", samples, 1, sampleRate, false);
+                      var data = new float[samples];
+                      var rng = new System.Random(12345);
+                      float prev = 0f;
+                      for (int i = 0; i < samples; i++)
+                      {
+                          float white = (float)(rng.NextDouble() * 2.0 - 1.0);
+                          prev = prev + 0.15f * (white - prev);
+                          data[i] = prev * 0.6f;
+                      }
+                      clip.SetData(data, 0);
+                      return clip;
+                  }
+
+                  public override void OnUpdate()
+                  {
+                      bool buttonHeld = GetButtonHeld(prefHand.Value);
+                      if (prefToggleMode.Value) { if (buttonHeld && !lastButtonState) isPeeing = !isPeeing; }
+                      else { isPeeing = buttonHeld; }
+                      lastButtonState = buttonHeld;
+
+                      if (isPeeing) UpdatePeeing();
+                      else StopPeeing();
+                  }
+
+                  bool GetButtonHeld(XRNode node)
+                  {
+                      var device = InputDevices.GetDeviceAtXRNode(node);
+                      if (!device.isValid) return false;
+                      if (device.TryGetFeatureValue(CommonUsages.primaryButton, out bool primary) && primary) return true;
+                      if (device.TryGetFeatureValue(CommonUsages.triggerButton, out bool trig) && trig) return true;
+                      return false;
+                  }
+
+                  void UpdatePeeing()
+                  {
+                      if (Camera.main == null) return;
+                      Transform head = Camera.main.transform;
+                      Vector3 origin = head.position + Vector3.down * 0.55f + head.forward * 0.08f;
+                      Vector3 aimDir = (head.forward + Vector3.down * 0.5f).normalized;
+
+                      if (!stream.enabled)
+                      {
+                          stream.enabled = true;
+                          if (!audioSource.isPlaying) audioSource.Play();
+                          puddleObj.SetActive(true);
+                          havePuddlePos = false;
+                      }
+
+                      int count = stream.positionCount;
+                      float dist = prefFlowStrength.Value;
+                      for (int i = 0; i < count; i++)
+                      {
+                          float t = i / (float)(count - 1);
+                          Vector3 p = origin + aimDir * dist * t;
+                          p.y = origin.y + (aimDir.y * dist * t) - (2.0f * t * t);
+                          p += head.right * Mathf.Sin(Time.time * 18f + i) * 0.01f;
+                          stream.SetPosition(i, p);
+                      }
+                      stream.transform.position = Vector3.zero;
+
+                      if (!havePuddlePos)
+                      {
+                          if (Physics.Raycast(origin, Vector3.down, out RaycastHit hit, 5f)) { lockedPuddlePos = hit.point + Vector3.up * 0.01f; havePuddlePos = true; }
+                          else { lockedPuddlePos = origin + Vector3.down * 1.5f; havePuddlePos = true; }
+                      }
+                      puddleScale = Mathf.Min(MAX_PUDDLE_SCALE, puddleScale + Time.deltaTime * PUDDLE_GROW_RATE);
+                      puddleObj.transform.position = lockedPuddlePos;
+                      puddleObj.transform.localScale = new Vector3(puddleScale, 0.005f, puddleScale);
+                  }
+
+                  void StopPeeing()
+                  {
+                      if (stream != null && stream.enabled)
+                      {
+                          stream.enabled = false;
+                          if (audioSource.isPlaying) audioSource.Stop();
+                      }
+                      if (puddleObj != null && puddleObj.activeSelf && puddleScale > 0f)
+                      {
+                          puddleScale = Mathf.Max(0f, puddleScale - Time.deltaTime * 0.05f);
+                          puddleObj.transform.localScale = new Vector3(puddleScale, 0.005f, puddleScale);
+                          if (puddleScale <= 0f) { puddleObj.SetActive(false); havePuddlePos = false; }
+                      }
+                  }
+              }
+          }
+          EOF
+
+      - name: Fake MelonLoader References
+        run: |
